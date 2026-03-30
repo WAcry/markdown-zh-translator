@@ -4,6 +4,7 @@
 **/.vscode/**
 **/.vscode-test/**
 **/node_modules/**
+exec-plans/**
 out/test/**
 src/**
 scripts/**

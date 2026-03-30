@@ -87,10 +87,10 @@
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",
-    "compile": "tsc -p ./",
-    "watch": "tsc -watch -p ./",
-    "lint": "eslint \"src/**/*.ts\"",
-    "test": "npm run compile && mocha \"out/test/**/*.test.js\"",
+    "compile": "npx --no-install tsc -p ./",
+    "watch": "npx --no-install tsc -watch -p ./",
+    "lint": "npx --no-install eslint \"src/**/*.ts\"",
+    "test": "npm run compile && npx --no-install mocha \"out/test/**/*.test.js\"",
     "package:vsix": "node scripts/package-vsix.cjs"
   },
   "dependencies": {
