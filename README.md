@@ -8,7 +8,9 @@ Translate a file-system Markdown `.md` document into `*.zh-CN.md` inside VS Code
 - Sends the entire source Markdown document in one `chat/completions` request.
 - Expects the model to return one outer ``````markdown fenced block.
 - Reuses an existing translated file when the cache is still valid.
+- Restores a deleted translated file from the persistent local blob cache when the source and config still match.
 - Refuses to overwrite a translated file that has unsaved editor changes.
+- Can optionally delete the workspace `.zh-CN.md` file when the translated document closes, while keeping the local blob cache.
 
 ## Configuration
 
@@ -18,6 +20,8 @@ Set these settings in VS Code:
 - `markdownTranslator.baseUrl` (optional; defaults to `https://api.openai.com/v1`)
 - `markdownTranslator.requestTimeoutMs`
 - `markdownTranslator.systemPrompt` (optional)
+- `markdownTranslator.localBlobCacheMaxBytes` (optional; defaults to `10485760`)
+- `markdownTranslator.deleteTranslatedOnClose` (optional; defaults to `false`)
 
 Store the API key with the command:
 

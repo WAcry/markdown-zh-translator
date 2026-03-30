@@ -4,6 +4,7 @@ import type { ApiKeyStore } from "./apiKeyStore";
 import type { CacheRecord } from "./cacheStore";
 import type { CacheStore } from "./cacheStore";
 import type { MarkdownIntegrityValidator } from "./markdownIntegrityValidator";
+import type { LocalBlobCache } from "./localBlobCache";
 import type { MarkdownResponseParser } from "./markdownResponseParser";
 import type { TranslationClient } from "./openAiCompatibleClient";
 import type { ConfigurationPort, DocumentStatePort, FileSystemPort, LoggerPort, SourceDocumentSnapshot } from "./ports";
@@ -20,6 +21,7 @@ interface MarkdownTranslationServiceDeps {
   config: ConfigurationPort;
   apiKeyStore: ApiKeyStore;
   cacheStore: CacheStore;
+  localBlobCache: LocalBlobCache;
   translationClient: TranslationClient;
   responseParser: MarkdownResponseParser;
   integrityValidator: MarkdownIntegrityValidator;
@@ -43,11 +45,6 @@ export class MarkdownTranslationService {
     validateDocument(document);
 
     const settings = readExtensionSettings(this.deps.config);
-    const apiKey = (await this.deps.apiKeyStore.getApiKey())?.trim();
-    if (!apiKey) {
-      throw new Error("Missing API key. Run 'Markdown Translator: Set API Key' first.");
-    }
-
     const targetUri = toTargetMarkdownPath(document.fileName);
     if (this.deps.documentState.isDirty(targetUri)) {
       this.deps.logger.warn("target is dirty, abort overwrite");
@@ -61,7 +58,7 @@ export class MarkdownTranslationService {
       systemPrompt: settings.systemPrompt
     });
 
-    const cacheRecord = await this.deps.cacheStore.get(document.uri);
+    let cacheRecord = await this.deps.cacheStore.get(document.uri);
     const targetExists = await this.deps.fileSystem.exists(targetUri);
     const currentTargetText = targetExists ? await this.deps.fileSystem.readFile(targetUri) : undefined;
     const currentTargetHash = targetExists ? sha256Hex(currentTargetText ?? "") : undefined;
@@ -81,7 +78,34 @@ export class MarkdownTranslationService {
       };
     }
 
+    if (
+      cacheRecord &&
+      cacheRecord.sourceUri === document.uri &&
+      cacheRecord.targetUri === targetUri &&
+      cacheRecord.sourceHash === sourceHash &&
+      cacheRecord.configSignature === configSignature &&
+      !targetExists
+    ) {
+      cacheRecord = await this.enforceCurrentBlobLimit(document.uri, cacheRecord, settings.localBlobCacheMaxBytes);
+      const restoredMarkdown = await this.deps.localBlobCache.read(cacheRecord);
+      if (restoredMarkdown !== undefined) {
+        await this.writeTargetFile(targetUri, restoredMarkdown);
+        const touchedRecord = this.deps.localBlobCache.touch(cacheRecord);
+        await this.deps.cacheStore.set(document.uri, touchedRecord);
+        this.deps.logger.info("cache: hit (restored from local blob)");
+        return {
+          targetUri,
+          cacheStatus: "hit"
+        };
+      }
+    }
+
     this.deps.logger.info(`cache: miss (${cacheReason})`);
+    const apiKey = (await this.deps.apiKeyStore.getApiKey())?.trim();
+    if (!apiKey) {
+      throw new Error("Missing API key. Run 'Markdown Translator: Set API Key' first.");
+    }
+
     const rawResponse = await this.deps.translationClient.translateDocument(
       document.text,
       {
@@ -108,9 +132,7 @@ export class MarkdownTranslationService {
       translatedMarkdown
     });
 
-    const tempPath = join(dirname(targetUri), `${sha256Hex(targetUri)}.${Date.now()}.tmp`);
-    await this.deps.fileSystem.writeFile(tempPath, translatedMarkdown);
-    await this.deps.fileSystem.rename(tempPath, targetUri);
+    await this.writeTargetFile(targetUri, translatedMarkdown);
 
     const newTargetHash = sha256Hex(translatedMarkdown);
     const record: CacheRecord = {
@@ -121,13 +143,100 @@ export class MarkdownTranslationService {
       configSignature,
       generatedAt: this.now()
     };
-    await this.deps.cacheStore.set(document.uri, record);
+    const recordWithBlob = await this.persistBlobAndPrune(cacheRecord, record, translatedMarkdown, settings.localBlobCacheMaxBytes);
+    await this.deps.cacheStore.set(document.uri, recordWithBlob);
     this.deps.logger.info(`wrote: ${targetUri}`);
 
     return {
       targetUri,
       cacheStatus: "miss"
     };
+  }
+
+  private async writeTargetFile(targetUri: string, translatedMarkdown: string): Promise<void> {
+    const tempPath = join(dirname(targetUri), `${sha256Hex(targetUri)}.${Date.now()}.tmp`);
+    await this.deps.fileSystem.ensureDir(dirname(targetUri));
+    await this.deps.fileSystem.writeFile(tempPath, translatedMarkdown);
+    await this.deps.fileSystem.rename(tempPath, targetUri);
+  }
+
+  private async persistBlobAndPrune(
+    previousRecord: CacheRecord | undefined,
+    record: CacheRecord,
+    translatedMarkdown: string,
+    maxBytes: number
+  ): Promise<CacheRecord> {
+    if (maxBytes <= 0) {
+      await this.deleteObsoleteBlob(previousRecord);
+      return clearBlobMetadata(record);
+    }
+
+    const blobKey = this.deps.localBlobCache.buildBlobKey(record.sourceUri, record.sourceHash, record.configSignature);
+    const blobMetadata = await this.deps.localBlobCache.write(blobKey, translatedMarkdown, maxBytes);
+    if (!blobMetadata) {
+      await this.deleteObsoleteBlob(previousRecord);
+      return clearBlobMetadata(record);
+    }
+
+    await this.deleteObsoleteBlob(previousRecord, blobKey);
+
+    const allRecords = await this.deps.cacheStore.getAll();
+    const nextRecord: CacheRecord = {
+      ...record,
+      ...blobMetadata
+    };
+    allRecords[record.sourceUri] = nextRecord;
+
+    const evictable = Object.entries(allRecords)
+      .filter(([, value]) => value.blobKey && value.blobByteSize && value.lastAccessedAt)
+      .sort((left, right) => String(left[1].lastAccessedAt).localeCompare(String(right[1].lastAccessedAt)));
+
+    let totalBytes = evictable.reduce((sum, [, value]) => sum + Number(value.blobByteSize ?? 0), 0);
+    for (const [sourceUri, value] of evictable) {
+      if (totalBytes <= maxBytes) {
+        break;
+      }
+
+      if (!value.blobKey || !value.blobByteSize) {
+        continue;
+      }
+
+      await this.deps.localBlobCache.delete(value.blobKey);
+      totalBytes -= value.blobByteSize;
+      allRecords[sourceUri] = clearBlobMetadata(value);
+      this.deps.logger.info(`blob: evicted (lru) ${value.blobKey}`);
+    }
+
+    await this.deps.cacheStore.replaceAll(allRecords);
+    return allRecords[record.sourceUri] ?? clearBlobMetadata(record);
+  }
+
+  private async deleteObsoleteBlob(previousRecord: CacheRecord | undefined, nextBlobKey?: string): Promise<void> {
+    if (!previousRecord?.blobKey) {
+      return;
+    }
+
+    if (previousRecord.blobKey === nextBlobKey) {
+      return;
+    }
+
+    await this.deps.localBlobCache.delete(previousRecord.blobKey);
+  }
+
+  private async enforceCurrentBlobLimit(sourceUri: string, record: CacheRecord, maxBytes: number): Promise<CacheRecord> {
+    if (!record.blobKey || record.blobByteSize === undefined) {
+      return record;
+    }
+
+    if (maxBytes > 0 && record.blobByteSize <= maxBytes) {
+      return record;
+    }
+
+    await this.deps.localBlobCache.delete(record.blobKey);
+    const nextRecord = clearBlobMetadata(record);
+    await this.deps.cacheStore.set(sourceUri, nextRecord);
+    this.deps.logger.info(`blob: evicted (over current limit) ${record.blobKey}`);
+    return nextRecord;
   }
 }
 
@@ -202,4 +311,15 @@ export const INTERNAL_CONTRACT = {
 
 function truncateForLog(value: string): string {
   return value.replace(/\s+/g, " ").slice(0, 300);
+}
+
+function clearBlobMetadata(record: CacheRecord): CacheRecord {
+  return {
+    sourceUri: record.sourceUri,
+    targetUri: record.targetUri,
+    sourceHash: record.sourceHash,
+    targetHash: record.targetHash,
+    configSignature: record.configSignature,
+    generatedAt: record.generatedAt
+  };
 }

@@ -12,6 +12,7 @@
     "Other"
   ],
   "activationEvents": [
+    "onStartupFinished",
     "onCommand:markdownTranslator.translateCurrentDocument",
     "onCommand:markdownTranslator.setApiKey",
     "onCommand:markdownTranslator.clearApiKey"
@@ -65,6 +66,17 @@
           "type": "string",
           "default": "",
           "description": "Optional extra system prompt appended to the built-in Markdown translation rules."
+        },
+        "markdownTranslator.localBlobCacheMaxBytes": {
+          "type": "number",
+          "default": 10485760,
+          "minimum": 0,
+          "description": "Maximum size in bytes for the persistent local translated Markdown blob cache."
+        },
+        "markdownTranslator.deleteTranslatedOnClose": {
+          "type": "boolean",
+          "default": false,
+          "description": "When enabled, closing an untouched generated .zh-CN.md document deletes only the workspace copy and keeps the local blob cache."
         }
       }
     }

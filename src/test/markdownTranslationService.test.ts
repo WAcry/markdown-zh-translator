@@ -1,8 +1,10 @@
 import { strict as assert } from "node:assert";
+import { join } from "node:path";
 
 import { ApiKeyStore } from "../services/apiKeyStore";
 import { CacheStore } from "../services/cacheStore";
 import { MarkdownIntegrityValidator } from "../services/markdownIntegrityValidator";
+import { LocalBlobCache } from "../services/localBlobCache";
 import { MarkdownResponseParser } from "../services/markdownResponseParser";
 import { MarkdownTranslationService } from "../services/markdownTranslationService";
 import type { ConfigurationPort, DocumentStatePort, FileSystemPort, LoggerPort, SecretStorePort, SourceDocumentSnapshot, StateStorePort } from "../services/ports";
@@ -52,17 +54,19 @@ describe("MarkdownTranslationService", () => {
   it("sends the full markdown once and writes the translated file", async () => {
     const fakeClient = new FakeTranslationClient();
     const files = new Map<string, string>();
+    const source = createSourceDocument("# Hello\n\nUse `npm install`.");
     const service = createService({
       translationClient: fakeClient,
       fileSystem: createMemoryFileSystem(files)
     });
 
-    const result = await service.translateCurrentDocument(createSourceDocument("# Hello\n\nUse `npm install`."));
+    const result = await service.translateCurrentDocument(source);
 
     assert.equal(result.cacheStatus, "miss");
     assert.equal(fakeClient.sourceMarkdowns.length, 1);
     assert.equal(fakeClient.sourceMarkdowns[0], "# Hello\n\nUse `npm install`.");
     assert.equal(files.get("/tmp/example.zh-CN.md"), "# 欢迎\n\nUse `npm install`.");
+    assert.ok(files.has(join("/tmp/blob-cache", `${createDefaultBlobKey(source)}.md`)));
   });
 
   it("does not call the client when the cache is still valid", async () => {
@@ -87,6 +91,76 @@ describe("MarkdownTranslationService", () => {
       translationClient: fakeClient,
       fileSystem: createMemoryFileSystem(files),
       state
+    });
+
+    const result = await service.translateCurrentDocument(source);
+
+    assert.equal(result.cacheStatus, "hit");
+    assert.equal(fakeClient.sourceMarkdowns.length, 0);
+  });
+
+  it("restores a missing target file from the local blob cache", async () => {
+    const fakeClient = new FakeTranslationClient();
+    const source = createSourceDocument("# Hello\n\nUse `npm install`.");
+    const blobContent = "# 已缓存\n\nUse `npm install`.";
+    const blobKey = createDefaultBlobKey(source);
+    const files = new Map<string, string>([[join("/tmp/blob-cache", `${blobKey}.md`), blobContent]]);
+    const state = new Map<string, unknown>();
+    state.set("markdownTranslator.cache.v1", {
+      [source.uri]: {
+        sourceUri: source.uri,
+        targetUri: "/tmp/example.zh-CN.md",
+        sourceHash: sha256Hex(source.text),
+        targetHash: sha256Hex(blobContent),
+        configSignature: defaultConfigSignature(),
+        generatedAt: "2026-03-30T00:00:00Z",
+        blobKey,
+        blobHash: sha256Hex(blobContent),
+        blobByteSize: Buffer.byteLength(blobContent, "utf8"),
+        lastAccessedAt: "2026-03-30T00:00:00Z"
+      }
+    });
+
+    const service = createService({
+      translationClient: fakeClient,
+      fileSystem: createMemoryFileSystem(files),
+      state
+    });
+
+    const result = await service.translateCurrentDocument(source);
+
+    assert.equal(result.cacheStatus, "hit");
+    assert.equal(fakeClient.sourceMarkdowns.length, 0);
+    assert.equal(files.get("/tmp/example.zh-CN.md"), blobContent);
+  });
+
+  it("restores from the local blob cache even when the API key is missing", async () => {
+    const fakeClient = new FakeTranslationClient();
+    const source = createSourceDocument("# Hello\n\nUse `npm install`.");
+    const blobContent = "# 已缓存\n\nUse `npm install`.";
+    const blobKey = createDefaultBlobKey(source);
+    const files = new Map<string, string>([[join("/tmp/blob-cache", `${blobKey}.md`), blobContent]]);
+    const state = new Map<string, unknown>();
+    state.set("markdownTranslator.cache.v1", {
+      [source.uri]: {
+        sourceUri: source.uri,
+        targetUri: "/tmp/example.zh-CN.md",
+        sourceHash: sha256Hex(source.text),
+        targetHash: sha256Hex(blobContent),
+        configSignature: defaultConfigSignature(),
+        generatedAt: "2026-03-30T00:00:00Z",
+        blobKey,
+        blobHash: sha256Hex(blobContent),
+        blobByteSize: Buffer.byteLength(blobContent, "utf8"),
+        lastAccessedAt: "2026-03-30T00:00:00Z"
+      }
+    });
+
+    const service = createService({
+      translationClient: fakeClient,
+      fileSystem: createMemoryFileSystem(files),
+      state,
+      secrets: new Map<string, string>()
     });
 
     const result = await service.translateCurrentDocument(source);
@@ -204,6 +278,260 @@ describe("MarkdownTranslationService", () => {
       /5-backtick fence/
     );
   });
+
+  it("skips blob persistence when the translated markdown exceeds the max cache size", async () => {
+    const fakeClient = new FakeTranslationClient();
+    const files = new Map<string, string>();
+    const service = createService({
+      translationClient: fakeClient,
+      fileSystem: createMemoryFileSystem(files),
+      config: {
+        get: <T>(key: string) => {
+          switch (key) {
+            case "model":
+              return "gpt-test" as T;
+            case "requestTimeoutMs":
+              return 10000 as T;
+            case "localBlobCacheMaxBytes":
+              return 1 as T;
+            default:
+              return undefined;
+          }
+        }
+      }
+    });
+
+    await service.translateCurrentDocument(createSourceDocument("# Hello\n\nUse `npm install`."));
+
+    assert.equal(Array.from(files.keys()).some((key) => key.includes("/tmp/blob-cache/")), false);
+  });
+
+  it("does not restore an existing blob when the current max cache size disables blob caching", async () => {
+    const fakeClient = new FakeTranslationClient();
+    const source = createSourceDocument("# Hello\n\nUse `npm install`.");
+    const blobContent = "# 已缓存\n\nUse `npm install`.";
+    const blobKey = createDefaultBlobKey(source);
+    const files = new Map<string, string>([[join("/tmp/blob-cache", `${blobKey}.md`), blobContent]]);
+    const state = new Map<string, unknown>();
+    state.set("markdownTranslator.cache.v1", {
+      [source.uri]: {
+        sourceUri: source.uri,
+        targetUri: "/tmp/example.zh-CN.md",
+        sourceHash: sha256Hex(source.text),
+        targetHash: sha256Hex(blobContent),
+        configSignature: defaultConfigSignature(),
+        generatedAt: "2026-03-30T00:00:00Z",
+        blobKey,
+        blobHash: sha256Hex(blobContent),
+        blobByteSize: Buffer.byteLength(blobContent, "utf8"),
+        lastAccessedAt: "2026-03-30T00:00:00Z"
+      }
+    });
+
+    const service = createService({
+      translationClient: fakeClient,
+      fileSystem: createMemoryFileSystem(files),
+      state,
+      config: {
+        get: <T>(key: string) => {
+          switch (key) {
+            case "model":
+              return "gpt-test" as T;
+            case "requestTimeoutMs":
+              return 10000 as T;
+            case "localBlobCacheMaxBytes":
+              return 0 as T;
+            default:
+              return undefined;
+          }
+        }
+      }
+    });
+
+    const result = await service.translateCurrentDocument(source);
+
+    assert.equal(result.cacheStatus, "miss");
+    assert.equal(fakeClient.sourceMarkdowns.length, 1);
+    assert.equal(files.has(join("/tmp/blob-cache", `${blobKey}.md`)), false);
+  });
+
+  it("deletes the previous blob when the same source is retranslated with a new source hash", async () => {
+    const fakeClient = new FakeTranslationClient();
+    const oldSource = createSourceDocument("# Hello\n\nUse `npm install`.");
+    const newSource = createSourceDocument("# Hello again\n\nUse `npm install`.");
+    const oldBlobKey = createDefaultBlobKey(oldSource);
+    const files = new Map<string, string>([
+      [join("/tmp/blob-cache", `${oldBlobKey}.md`), "# 已缓存\n\nUse `npm install`."]
+    ]);
+    const state = new Map<string, unknown>();
+    state.set("markdownTranslator.cache.v1", {
+      [newSource.uri]: {
+        sourceUri: newSource.uri,
+        targetUri: "/tmp/example.zh-CN.md",
+        sourceHash: sha256Hex(oldSource.text),
+        targetHash: sha256Hex("# 已缓存\n\nUse `npm install`."),
+        configSignature: defaultConfigSignature(),
+        generatedAt: "2026-03-30T00:00:00Z",
+        blobKey: oldBlobKey,
+        blobHash: sha256Hex("# 已缓存\n\nUse `npm install`."),
+        blobByteSize: Buffer.byteLength("# 已缓存\n\nUse `npm install`.", "utf8"),
+        lastAccessedAt: "2026-03-30T00:00:00Z"
+      }
+    });
+
+    const service = createService({
+      translationClient: fakeClient,
+      fileSystem: createMemoryFileSystem(files),
+      state
+    });
+
+    await service.translateCurrentDocument(newSource);
+
+    assert.equal(files.has(join("/tmp/blob-cache", `${oldBlobKey}.md`)), false);
+  });
+
+  it("evicts the least recently used blob when the cache exceeds the configured size", async () => {
+    const fakeClient = new FakeTranslationClient();
+    const newBlobSize = Buffer.byteLength("# 欢迎\n\nUse `npm install`.", "utf8");
+    const files = new Map<string, string>([
+      [join("/tmp/blob-cache", "old-a.md"), "AAAA"],
+      [join("/tmp/blob-cache", "new-b.md"), "BBBB"]
+    ]);
+    const state = new Map<string, unknown>();
+    state.set("markdownTranslator.cache.v1", {
+      "file:///tmp/old-a.md": {
+        sourceUri: "file:///tmp/old-a.md",
+        targetUri: "/tmp/old-a.zh-CN.md",
+        sourceHash: "old-a",
+        targetHash: sha256Hex("AAAA"),
+        configSignature: defaultConfigSignature(),
+        generatedAt: "2026-03-30T00:00:00Z",
+        blobKey: "old-a",
+        blobHash: sha256Hex("AAAA"),
+        blobByteSize: 4,
+        lastAccessedAt: "2026-03-30T00:00:00Z"
+      },
+      "file:///tmp/new-b.md": {
+        sourceUri: "file:///tmp/new-b.md",
+        targetUri: "/tmp/new-b.zh-CN.md",
+        sourceHash: "new-b",
+        targetHash: sha256Hex("BBBB"),
+        configSignature: defaultConfigSignature(),
+        generatedAt: "2026-03-30T00:00:00Z",
+        blobKey: "new-b",
+        blobHash: sha256Hex("BBBB"),
+        blobByteSize: 4,
+        lastAccessedAt: "2026-03-30T01:00:00Z"
+      }
+    });
+
+    const filesWithExisting = createMemoryFileSystem(files);
+    const service = createService({
+      translationClient: fakeClient,
+      fileSystem: filesWithExisting,
+      state,
+      config: {
+        get: <T>(key: string) => {
+          switch (key) {
+            case "model":
+              return "gpt-test" as T;
+            case "requestTimeoutMs":
+              return 10000 as T;
+            case "localBlobCacheMaxBytes":
+              return (newBlobSize + 4) as T;
+            default:
+              return undefined;
+          }
+        }
+      }
+    });
+
+    await service.translateCurrentDocument(createSourceDocument("# Hello\n\nUse `npm install`."));
+
+    assert.equal(files.has(join("/tmp/blob-cache", "old-a.md")), false);
+    assert.equal(files.has(join("/tmp/blob-cache", "new-b.md")), true);
+  });
+
+  it("removes an existing blob when local blob caching is disabled", async () => {
+    const fakeClient = new FakeTranslationClient();
+    const source = createSourceDocument("# Hello\n\nUse `npm install`.");
+    const oldBlobKey = createDefaultBlobKey(source);
+    const files = new Map<string, string>([
+      [join("/tmp/blob-cache", `${oldBlobKey}.md`), "# 已缓存\n\nUse `npm install`."]
+    ]);
+    const state = new Map<string, unknown>();
+    state.set("markdownTranslator.cache.v1", {
+      [source.uri]: {
+        sourceUri: source.uri,
+        targetUri: "/tmp/example.zh-CN.md",
+        sourceHash: "old-source-hash",
+        targetHash: sha256Hex("# 已缓存\n\nUse `npm install`."),
+        configSignature: defaultConfigSignature(),
+        generatedAt: "2026-03-30T00:00:00Z",
+        blobKey: oldBlobKey,
+        blobHash: sha256Hex("# 已缓存\n\nUse `npm install`."),
+        blobByteSize: Buffer.byteLength("# 已缓存\n\nUse `npm install`.", "utf8"),
+        lastAccessedAt: "2026-03-30T00:00:00Z"
+      }
+    });
+
+    const service = createService({
+      translationClient: fakeClient,
+      fileSystem: createMemoryFileSystem(files),
+      state,
+      config: {
+        get: <T>(key: string) => {
+          switch (key) {
+            case "model":
+              return "gpt-test" as T;
+            case "requestTimeoutMs":
+              return 10000 as T;
+            case "localBlobCacheMaxBytes":
+              return 0 as T;
+            default:
+              return undefined;
+          }
+        }
+      }
+    });
+
+    await service.translateCurrentDocument(source);
+
+    assert.equal(files.has(join("/tmp/blob-cache", `${oldBlobKey}.md`)), false);
+  });
+
+  it("falls back to a network request when blob restore cannot validate the blob hash", async () => {
+    const fakeClient = new FakeTranslationClient();
+    const source = createSourceDocument("# Hello\n\nUse `npm install`.");
+    const blobKey = createDefaultBlobKey(source);
+    const files = new Map<string, string>([[join("/tmp/blob-cache", `${blobKey}.md`), "# 被篡改"]]);
+    const state = new Map<string, unknown>();
+    state.set("markdownTranslator.cache.v1", {
+      [source.uri]: {
+        sourceUri: source.uri,
+        targetUri: "/tmp/example.zh-CN.md",
+        sourceHash: sha256Hex(source.text),
+        targetHash: sha256Hex("# 已缓存\n\nUse `npm install`."),
+        configSignature: defaultConfigSignature(),
+        generatedAt: "2026-03-30T00:00:00Z",
+        blobKey,
+        blobHash: sha256Hex("# 已缓存\n\nUse `npm install`."),
+        blobByteSize: Buffer.byteLength("# 已缓存\n\nUse `npm install`.", "utf8"),
+        lastAccessedAt: "2026-03-30T00:00:00Z"
+      }
+    });
+
+    const service = createService({
+      translationClient: fakeClient,
+      fileSystem: createMemoryFileSystem(files),
+      state
+    });
+
+    const result = await service.translateCurrentDocument(source);
+
+    assert.equal(result.cacheStatus, "miss");
+    assert.equal(fakeClient.sourceMarkdowns.length, 1);
+  });
 });
 
 function defaultConfigSignature(): string {
@@ -219,8 +547,9 @@ function createService(overrides?: {
   fileSystem?: FileSystemPort;
   translationClient?: FakeTranslationClient;
   state?: Map<string, unknown>;
+  secrets?: Map<string, string>;
 }) {
-  const secrets = new Map<string, string>([["markdownTranslator.apiKey", "secret"]]);
+  const secrets = overrides?.secrets ?? new Map<string, string>([["markdownTranslator.apiKey", "secret"]]);
   const state = overrides?.state ?? new Map<string, unknown>();
 
   return new MarkdownTranslationService({
@@ -240,6 +569,7 @@ function createService(overrides?: {
       } satisfies ConfigurationPort),
     apiKeyStore: new ApiKeyStore(createSecretStore(secrets)),
     cacheStore: new CacheStore(createStateStore(state)),
+    localBlobCache: new LocalBlobCache(overrides?.fileSystem ?? createMemoryFileSystem(new Map<string, string>()), createLogger(), "/tmp/blob-cache"),
     translationClient: (overrides?.translationClient ?? new FakeTranslationClient()) as never,
     responseParser: new MarkdownResponseParser(),
     integrityValidator: new MarkdownIntegrityValidator(),
@@ -304,8 +634,17 @@ function createMemoryFileSystem(files: Map<string, string>): FileSystemPort {
     },
     delete: async (filePath: string) => {
       files.delete(filePath);
-    }
+    },
+    ensureDir: async (_directoryPath: string) => undefined
   };
+}
+
+function createDefaultBlobKey(source: SourceDocumentSnapshot): string {
+  return new LocalBlobCache(createMemoryFileSystem(new Map<string, string>()), createLogger(), "/tmp/blob-cache").buildBlobKey(
+    source.uri,
+    sha256Hex(source.text),
+    defaultConfigSignature()
+  );
 }
 
 function createLogger(): LoggerPort {

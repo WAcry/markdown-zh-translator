@@ -7,12 +7,20 @@ export interface SourceDocumentSnapshot {
   text: string;
 }
 
+export interface ClosedDocumentSnapshot {
+  uri: string;
+  fileName: string;
+  isUntitled: boolean;
+  isFileSystemResource: boolean;
+}
+
 export interface FileSystemPort {
   exists(filePath: string): Promise<boolean>;
   readFile(filePath: string): Promise<string>;
   writeFile(filePath: string, content: string): Promise<void>;
   rename(fromPath: string, toPath: string): Promise<void>;
   delete(filePath: string): Promise<void>;
+  ensureDir(directoryPath: string): Promise<void>;
 }
 
 export interface DocumentStatePort {
