@@ -1,0 +1,9 @@
+**/.git/**
+**/.gitignore
+**/.vscode/**
+**/.vscode-test/**
+**/node_modules/**
+src/**
+test-fixtures/**
+eslint.config.js
+tsconfig.json

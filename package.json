@@ -1,0 +1,94 @@
+{
+  "name": "markdown-zh-translator",
+  "displayName": "Markdown Zh Translator",
+  "description": "Translate Markdown files to zh-CN inside VS Code.",
+  "version": "0.1.0",
+  "publisher": "local",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.97.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onCommand:markdownTranslator.translateCurrentDocument",
+    "onCommand:markdownTranslator.setApiKey",
+    "onCommand:markdownTranslator.clearApiKey"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "markdownTranslator.translateCurrentDocument",
+        "title": "Translate to Chinese",
+        "icon": "$(globe)"
+      },
+      {
+        "command": "markdownTranslator.setApiKey",
+        "title": "Markdown Translator: Set API Key"
+      },
+      {
+        "command": "markdownTranslator.clearApiKey",
+        "title": "Markdown Translator: Clear API Key"
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "markdownTranslator.translateCurrentDocument",
+          "group": "navigation",
+          "when": "resourceLangId == markdown && resourceExtname == .md && isFileSystemResource && !(resourceFilename =~ /\\.zh-CN\\.md$/i)"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Markdown Translator",
+      "properties": {
+        "markdownTranslator.baseUrl": {
+          "type": "string",
+          "default": "https://api.openai.com/v1",
+          "description": "Base URL for the OpenAI-compatible API."
+        },
+        "markdownTranslator.model": {
+          "type": "string",
+          "default": "",
+          "description": "Model name used for Markdown translation."
+        },
+        "markdownTranslator.requestTimeoutMs": {
+          "type": "number",
+          "default": 120000,
+          "minimum": 1000,
+          "description": "HTTP timeout for translation requests in milliseconds."
+        },
+        "markdownTranslator.systemPrompt": {
+          "type": "string",
+          "default": "",
+          "description": "Optional extra system prompt appended to the built-in Markdown translation rules."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "lint": "eslint \"src/**/*.ts\"",
+    "test": "npm run compile && mocha \"out/test/**/*.test.js\""
+  },
+  "dependencies": {
+    "undici": "^6.21.3",
+    "yaml": "^2.7.1"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.20.0",
+    "@types/mocha": "^10.0.10",
+    "@types/node": "^22.13.1",
+    "@types/vscode": "^1.97.0",
+    "@typescript-eslint/eslint-plugin": "^8.24.0",
+    "@typescript-eslint/parser": "^8.24.0",
+    "eslint": "^9.20.0",
+    "globals": "^15.14.0",
+    "mocha": "^11.1.0",
+    "typescript": "^5.7.3"
+  }
+}
