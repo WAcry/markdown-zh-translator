@@ -6,7 +6,7 @@ export const PROMPT_VERSION = "v1";
 export const RULES_VERSION = "v1";
 
 export const BUILTIN_SYSTEM_PROMPT = [
-  "You translate the full Markdown document from English to Simplified Chinese.",
+  "You translate the full Markdown document from English to 简体中文 (Simplified Chinese).",
   "Return exactly one outer fenced Markdown block using 5 backticks.",
   "The first line must be `````markdown and the last line must be `````.",
   "Do not return JSON.",

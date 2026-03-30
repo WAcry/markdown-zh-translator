@@ -124,7 +124,7 @@ export class OpenAiCompatibleClient implements TranslationClient {
 
 function buildUserPrompt(sourceMarkdown: string): string {
   return [
-    "Translate the full Markdown document to Simplified Chinese.",
+    "Translate the full Markdown document to 简体中文 (Simplified Chinese).",
     "Return exactly one outer fenced Markdown block using 5 backticks.",
     "Do not return JSON.",
     "Do not explain anything.",
