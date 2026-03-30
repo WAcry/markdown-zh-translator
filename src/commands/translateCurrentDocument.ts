@@ -3,7 +3,10 @@ import * as vscode from "vscode";
 import type { MarkdownTranslationService } from "../services/markdownTranslationService";
 import type { SourceDocumentSnapshot } from "../services/ports";
 
-export function createTranslateCurrentDocumentCommand(service: MarkdownTranslationService): () => Promise<void> {
+export function createTranslateCurrentDocumentCommand(
+  service: MarkdownTranslationService,
+  options?: { forceRefresh?: boolean }
+): () => Promise<void> {
   return async () => {
     const editor = vscode.window.activeTextEditor;
     if (!editor) {
@@ -16,9 +19,9 @@ export function createTranslateCurrentDocumentCommand(service: MarkdownTranslati
       const result = await vscode.window.withProgress(
         {
           location: vscode.ProgressLocation.Notification,
-          title: "Translating Markdown to Chinese"
+          title: options?.forceRefresh ? "Refreshing Chinese translation" : "Translating Markdown to Chinese"
         },
-        async () => service.translateCurrentDocument(document)
+        async () => service.translateCurrentDocument(document, { forceRefresh: options?.forceRefresh })
       );
 
       const targetDocument = await vscode.workspace.openTextDocument(vscode.Uri.file(result.targetUri));

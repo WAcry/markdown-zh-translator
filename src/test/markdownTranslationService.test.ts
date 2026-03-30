@@ -3,12 +3,11 @@ import { join } from "node:path";
 
 import { ApiKeyStore } from "../services/apiKeyStore";
 import { CacheStore } from "../services/cacheStore";
-import { MarkdownIntegrityValidator } from "../services/markdownIntegrityValidator";
 import { LocalBlobCache } from "../services/localBlobCache";
 import { MarkdownResponseParser } from "../services/markdownResponseParser";
 import { MarkdownTranslationService } from "../services/markdownTranslationService";
 import type { ConfigurationPort, DocumentStatePort, FileSystemPort, LoggerPort, SecretStorePort, SourceDocumentSnapshot, StateStorePort } from "../services/ports";
-import { sha256Hex } from "../util/hash";
+import { sha256Hex, sha256HexRaw } from "../util/hash";
 import { computeConfigSignature } from "../util/translationContract";
 
 class FakeTranslationClient {
@@ -47,6 +46,19 @@ describe("MarkdownTranslationService", () => {
 
     await assert.rejects(
       () => service.translateCurrentDocument(createSourceDocument("# Hello")),
+      /save or discard/
+    );
+  });
+
+  it("force refresh still blocks overwrite when the target document is dirty", async () => {
+    const service = createService({
+      documentState: {
+        isDirty: () => true
+      }
+    });
+
+    await assert.rejects(
+      () => service.translateCurrentDocument(createSourceDocument("# Hello"), { forceRefresh: true }),
       /save or discard/
     );
   });
@@ -99,6 +111,93 @@ describe("MarkdownTranslationService", () => {
     assert.equal(fakeClient.sourceMarkdowns.length, 0);
   });
 
+  it("accepts a legacy raw target hash when line endings differ", async () => {
+    const fakeClient = new FakeTranslationClient();
+    const targetText = "# cached\r\nUse `npm install`.\r\n";
+    const files = new Map<string, string>([["/tmp/example.zh-CN.md", targetText]]);
+    const state = new Map<string, unknown>();
+    const source = createSourceDocument("# Hello\n\nUse `npm install`.");
+    state.set("markdownTranslator.cache.v1", {
+      [source.uri]: {
+        sourceUri: source.uri,
+        targetUri: "/tmp/example.zh-CN.md",
+        sourceHash: sha256Hex(source.text),
+        targetHash: sha256HexRaw("# cached\nUse `npm install`.\n"),
+        configSignature: defaultConfigSignature(),
+        generatedAt: "2026-03-30T00:00:00Z"
+      }
+    });
+
+    const service = createService({
+      translationClient: fakeClient,
+      fileSystem: createMemoryFileSystem(files),
+      state
+    });
+
+    const result = await service.translateCurrentDocument(source);
+
+    assert.equal(result.cacheStatus, "hit");
+    assert.equal(fakeClient.sourceMarkdowns.length, 0);
+  });
+
+  it("accepts a legacy raw CRLF target hash when the current file uses LF", async () => {
+    const fakeClient = new FakeTranslationClient();
+    const targetText = "# cached\nUse `npm install`.\n";
+    const files = new Map<string, string>([["/tmp/example.zh-CN.md", targetText]]);
+    const state = new Map<string, unknown>();
+    const source = createSourceDocument("# Hello\n\nUse `npm install`.");
+    state.set("markdownTranslator.cache.v1", {
+      [source.uri]: {
+        sourceUri: source.uri,
+        targetUri: "/tmp/example.zh-CN.md",
+        sourceHash: sha256Hex(source.text),
+        targetHash: sha256HexRaw("# cached\r\nUse `npm install`.\r\n"),
+        configSignature: defaultConfigSignature(),
+        generatedAt: "2026-03-30T00:00:00Z"
+      }
+    });
+
+    const service = createService({
+      translationClient: fakeClient,
+      fileSystem: createMemoryFileSystem(files),
+      state
+    });
+
+    const result = await service.translateCurrentDocument(source);
+
+    assert.equal(result.cacheStatus, "hit");
+    assert.equal(fakeClient.sourceMarkdowns.length, 0);
+  });
+
+  it("force refresh bypasses an on-disk cache hit and calls the client", async () => {
+    const fakeClient = new FakeTranslationClient();
+    const targetText = "# 已缓存\n\nUse `npm install`.";
+    const files = new Map<string, string>([["/tmp/example.zh-CN.md", targetText]]);
+    const state = new Map<string, unknown>();
+    const source = createSourceDocument("# Hello\n\nUse `npm install`.");
+    state.set("markdownTranslator.cache.v1", {
+      [source.uri]: {
+        sourceUri: source.uri,
+        targetUri: "/tmp/example.zh-CN.md",
+        sourceHash: sha256Hex(source.text),
+        targetHash: sha256Hex(targetText),
+        configSignature: defaultConfigSignature(),
+        generatedAt: "2026-03-30T00:00:00Z"
+      }
+    });
+
+    const service = createService({
+      translationClient: fakeClient,
+      fileSystem: createMemoryFileSystem(files),
+      state
+    });
+
+    const result = await service.translateCurrentDocument(source, { forceRefresh: true });
+
+    assert.equal(result.cacheStatus, "miss");
+    assert.equal(fakeClient.sourceMarkdowns.length, 1);
+  });
+
   it("restores a missing target file from the local blob cache", async () => {
     const fakeClient = new FakeTranslationClient();
     const source = createSourceDocument("# Hello\n\nUse `npm install`.");
@@ -132,6 +231,41 @@ describe("MarkdownTranslationService", () => {
     assert.equal(result.cacheStatus, "hit");
     assert.equal(fakeClient.sourceMarkdowns.length, 0);
     assert.equal(files.get("/tmp/example.zh-CN.md"), blobContent);
+  });
+
+  it("force refresh bypasses blob restore and requests a new translation", async () => {
+    const fakeClient = new FakeTranslationClient();
+    const source = createSourceDocument("# Hello\n\nUse `npm install`.");
+    const blobContent = "# 已缓存\n\nUse `npm install`.";
+    const blobKey = createDefaultBlobKey(source);
+    const files = new Map<string, string>([[join("/tmp/blob-cache", `${blobKey}.md`), blobContent]]);
+    const state = new Map<string, unknown>();
+    state.set("markdownTranslator.cache.v1", {
+      [source.uri]: {
+        sourceUri: source.uri,
+        targetUri: "/tmp/example.zh-CN.md",
+        sourceHash: sha256Hex(source.text),
+        targetHash: sha256Hex(blobContent),
+        configSignature: defaultConfigSignature(),
+        generatedAt: "2026-03-30T00:00:00Z",
+        blobKey,
+        blobHash: sha256Hex(blobContent),
+        blobByteSize: Buffer.byteLength(blobContent, "utf8"),
+        lastAccessedAt: "2026-03-30T00:00:00Z"
+      }
+    });
+
+    const service = createService({
+      translationClient: fakeClient,
+      fileSystem: createMemoryFileSystem(files),
+      state
+    });
+
+    const result = await service.translateCurrentDocument(source, { forceRefresh: true });
+
+    assert.equal(result.cacheStatus, "miss");
+    assert.equal(fakeClient.sourceMarkdowns.length, 1);
+    assert.equal(files.get("/tmp/example.zh-CN.md"), "# 欢迎\n\nUse `npm install`.");
   });
 
   it("restores from the local blob cache even when the API key is missing", async () => {
@@ -572,7 +706,6 @@ function createService(overrides?: {
     localBlobCache: new LocalBlobCache(overrides?.fileSystem ?? createMemoryFileSystem(new Map<string, string>()), createLogger(), "/tmp/blob-cache"),
     translationClient: (overrides?.translationClient ?? new FakeTranslationClient()) as never,
     responseParser: new MarkdownResponseParser(),
-    integrityValidator: new MarkdownIntegrityValidator(),
     fileSystem: overrides?.fileSystem ?? createMemoryFileSystem(new Map<string, string>()),
     documentState: overrides?.documentState ?? { isDirty: () => false },
     logger: createLogger()

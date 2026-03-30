@@ -18,6 +18,7 @@
   "activationEvents": [
     "onStartupFinished",
     "onCommand:markdownTranslator.translateCurrentDocument",
+    "onCommand:markdownTranslator.forceTranslateCurrentDocument",
     "onCommand:markdownTranslator.setApiKey",
     "onCommand:markdownTranslator.clearApiKey"
   ],
@@ -28,6 +29,11 @@
         "command": "markdownTranslator.translateCurrentDocument",
         "title": "Translate to Chinese",
         "icon": "$(globe)"
+      },
+      {
+        "command": "markdownTranslator.forceTranslateCurrentDocument",
+        "title": "Force Refresh Chinese Translation",
+        "icon": "$(refresh)"
       },
       {
         "command": "markdownTranslator.setApiKey",
@@ -43,6 +49,11 @@
         {
           "command": "markdownTranslator.translateCurrentDocument",
           "group": "navigation",
+          "when": "resourceLangId == markdown && resourceExtname == .md && isFileSystemResource && !(resourceFilename =~ /\\.zh-CN\\.md$/i)"
+        },
+        {
+          "command": "markdownTranslator.forceTranslateCurrentDocument",
+          "group": "navigation@2",
           "when": "resourceLangId == markdown && resourceExtname == .md && isFileSystemResource && !(resourceFilename =~ /\\.zh-CN\\.md$/i)"
         }
       ]
@@ -88,15 +99,14 @@
   "scripts": {
     "vscode:prepublish": "npm run build:extension",
     "build:extension": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\" && npx --no-install esbuild src/extension.ts --bundle --platform=node --format=cjs --external:vscode --outfile=dist/extension.js",
-    "compile": "npx --no-install tsc -p ./",
+    "compile": "node -e \"require('node:fs').rmSync('out', { recursive: true, force: true })\" && npx --no-install tsc -p ./",
     "watch": "npx --no-install tsc -watch -p ./",
     "lint": "npx --no-install eslint \"src/**/*.ts\"",
     "test": "npm run compile && npx --no-install mocha \"out/test/**/*.test.js\"",
     "package:vsix": "node scripts/package-vsix.cjs"
   },
   "dependencies": {
-    "undici": "^6.21.3",
-    "yaml": "^2.7.1"
+    "undici": "^6.21.3"
   },
   "devDependencies": {
     "@eslint/js": "^9.20.0",
