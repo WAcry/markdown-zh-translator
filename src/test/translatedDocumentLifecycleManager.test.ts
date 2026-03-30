@@ -3,7 +3,7 @@ import { strict as assert } from "node:assert";
 import { CacheStore } from "../services/cacheStore";
 import { TranslatedDocumentLifecycleManager } from "../services/translatedDocumentLifecycleManager";
 import type { FileSystemPort, LoggerPort, StateStorePort } from "../services/ports";
-import { sha256Hex } from "../util/hash";
+import { sha256Hex, sha256HexRaw } from "../util/hash";
 
 describe("TranslatedDocumentLifecycleManager", () => {
   it("deletes an untouched generated translated document on close", async () => {
@@ -21,6 +21,76 @@ describe("TranslatedDocumentLifecycleManager", () => {
                 targetUri: filePath,
                 sourceHash: "source",
                 targetHash: sha256Hex(content),
+                configSignature: "signature",
+                generatedAt: "2026-03-30T00:00:00Z"
+              }
+            }
+          ]
+        ])
+      )
+    );
+
+    const manager = new TranslatedDocumentLifecycleManager(cacheStore, createMemoryFileSystem(files), createLogger());
+    const deleted = await manager.handleClosedTranslatedDocument({
+      uri: "file:///tmp/example.zh-CN.md",
+      fileName: filePath,
+      isUntitled: false,
+      isFileSystemResource: true
+    });
+
+    assert.equal(deleted, true);
+    assert.equal(files.has(filePath), false);
+  });
+
+  it("deletes an untouched generated translated document even when the file uses CRLF", async () => {
+    const filePath = "/tmp/example.zh-CN.md";
+    const files = new Map<string, string>([[filePath, "# cached\r\nline\r\n"]]);
+    const cacheStore = new CacheStore(
+      createStateStore(
+        new Map<string, unknown>([
+          [
+            "markdownTranslator.cache.v1",
+            {
+              "file:///tmp/example.md": {
+                sourceUri: "file:///tmp/example.md",
+                targetUri: filePath,
+                sourceHash: "source",
+                targetHash: sha256Hex("# cached\nline\n"),
+                configSignature: "signature",
+                generatedAt: "2026-03-30T00:00:00Z"
+              }
+            }
+          ]
+        ])
+      )
+    );
+
+    const manager = new TranslatedDocumentLifecycleManager(cacheStore, createMemoryFileSystem(files), createLogger());
+    const deleted = await manager.handleClosedTranslatedDocument({
+      uri: "file:///tmp/example.zh-CN.md",
+      fileName: filePath,
+      isUntitled: false,
+      isFileSystemResource: true
+    });
+
+    assert.equal(deleted, true);
+    assert.equal(files.has(filePath), false);
+  });
+
+  it("deletes an untouched generated translated document when the stored hash came from legacy CRLF content", async () => {
+    const filePath = "/tmp/example.zh-CN.md";
+    const files = new Map<string, string>([[filePath, "# cached\nline\n"]]);
+    const cacheStore = new CacheStore(
+      createStateStore(
+        new Map<string, unknown>([
+          [
+            "markdownTranslator.cache.v1",
+            {
+              "file:///tmp/example.md": {
+                sourceUri: "file:///tmp/example.md",
+                targetUri: filePath,
+                sourceHash: "source",
+                targetHash: sha256HexRaw("# cached\r\nline\r\n"),
                 configSignature: "signature",
                 generatedAt: "2026-03-30T00:00:00Z"
               }

@@ -1,6 +1,7 @@
 import { strict as assert } from "node:assert";
 
-import { readExtensionSettings } from "../util/config";
+import { readDeleteTranslatedOnCloseSetting, readExtensionSettings } from "../util/config";
+import { normalizeLineEndings, sha256Hex } from "../util/hash";
 import { computeConfigSignature, PROVIDER_ID, TARGET_LOCALE } from "../util/translationContract";
 
 describe("config", () => {
@@ -8,6 +9,8 @@ describe("config", () => {
     const settings = readExtensionSettings(createConfigPort({ model: "gpt-test" }));
 
     assert.equal(settings.baseUrl, "https://api.openai.com/v1");
+    assert.equal(settings.deleteTranslatedOnClose, false);
+    assert.equal(readDeleteTranslatedOnCloseSetting(createConfigPort({})), false);
   });
 
   it("throws when model is missing", () => {
@@ -55,6 +58,11 @@ describe("config", () => {
     assert.notEqual(left, right);
     assert.equal(TARGET_LOCALE, "zh-CN");
     assert.equal(PROVIDER_ID, "openai-compatible");
+  });
+
+  it("normalizes line endings before hashing", () => {
+    assert.equal(normalizeLineEndings("a\r\nb\rc"), "a\nb\nc");
+    assert.equal(sha256Hex("line1\r\nline2"), sha256Hex("line1\nline2"));
   });
 });
 

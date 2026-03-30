@@ -2,7 +2,7 @@ import { join } from "node:path";
 
 import type { CacheRecord } from "./cacheStore";
 import type { FileSystemPort, LoggerPort } from "./ports";
-import { sha256Hex } from "../util/hash";
+import { matchesStoredTextHash, sha256Hex } from "../util/hash";
 
 export interface BlobMetadata {
   blobKey: string;
@@ -34,7 +34,7 @@ export class LocalBlobCache {
     }
 
     const content = await this.fileSystem.readFile(blobPath);
-    if (sha256Hex(content) !== record.blobHash) {
+    if (!matchesStoredTextHash(content, record.blobHash)) {
       this.logger.warn(`blob: hash mismatch ${record.blobKey}`);
       return undefined;
     }

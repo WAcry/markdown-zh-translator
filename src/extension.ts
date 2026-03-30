@@ -7,7 +7,6 @@ import { createSetApiKeyCommand } from "./commands/setApiKey";
 import { createTranslateCurrentDocumentCommand } from "./commands/translateCurrentDocument";
 import { ApiKeyStore } from "./services/apiKeyStore";
 import { CacheStore } from "./services/cacheStore";
-import { MarkdownIntegrityValidator } from "./services/markdownIntegrityValidator";
 import { LocalBlobCache } from "./services/localBlobCache";
 import { MarkdownResponseParser } from "./services/markdownResponseParser";
 import { MarkdownTranslationService } from "./services/markdownTranslationService";
@@ -74,7 +73,6 @@ export function activate(context: vscode.ExtensionContext): void {
   const cacheStore = new CacheStore(state);
   const localBlobCache = new LocalBlobCache(fileSystem, logger, join(context.globalStorageUri.fsPath, "blob-cache"));
   const responseParser = new MarkdownResponseParser();
-  const integrityValidator = new MarkdownIntegrityValidator();
   const translationClient = new OpenAiCompatibleClient(logger);
   const lifecycleManager = new TranslatedDocumentLifecycleManager(cacheStore, fileSystem, logger);
   const translationService = new MarkdownTranslationService({
@@ -84,7 +82,6 @@ export function activate(context: vscode.ExtensionContext): void {
     localBlobCache,
     translationClient,
     responseParser,
-    integrityValidator,
     fileSystem,
     documentState,
     logger
@@ -92,6 +89,10 @@ export function activate(context: vscode.ExtensionContext): void {
 
   context.subscriptions.push(
     vscode.commands.registerCommand("markdownTranslator.translateCurrentDocument", createTranslateCurrentDocumentCommand(translationService)),
+    vscode.commands.registerCommand(
+      "markdownTranslator.forceTranslateCurrentDocument",
+      createTranslateCurrentDocumentCommand(translationService, { forceRefresh: true })
+    ),
     vscode.commands.registerCommand("markdownTranslator.setApiKey", createSetApiKeyCommand(apiKeyStore)),
     vscode.commands.registerCommand("markdownTranslator.clearApiKey", createClearApiKeyCommand(apiKeyStore))
   );

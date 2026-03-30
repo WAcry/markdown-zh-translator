@@ -4,7 +4,8 @@ Translate a file-system Markdown `.md` document into `*.zh-CN.md` inside VS Code
 
 ## What V1 Does
 
-- Adds one editor title action for eligible `.md` files.
+- Adds two editor title actions for eligible `.md` files.
+- Adds a force-refresh action when you want a brand new translation instead of a cache or local blob restore result.
 - Sends the entire source Markdown document in one `chat/completions` request.
 - Expects the model to return one outer ``````markdown fenced block.
 - Reuses an existing translated file when the cache is still valid.
@@ -58,4 +59,4 @@ Run the extension with `F5` in VS Code.
 
 - Only `.md` file-system documents are supported.
 - `.mdx`, `.markdown`, untitled documents, and virtual documents are rejected.
-- V1 relies on prompt rules plus local integrity checks instead of AST rewriting.
+- V1 relies on prompt rules to preserve Markdown structure and intentionally does not hard-reject minor formatting drift from the model.

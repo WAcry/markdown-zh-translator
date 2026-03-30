@@ -1,6 +1,6 @@
 import type { CacheStore } from "./cacheStore";
 import type { ClosedDocumentSnapshot, FileSystemPort, LoggerPort } from "./ports";
-import { sha256Hex } from "../util/hash";
+import { matchesStoredTextHash } from "../util/hash";
 
 export class TranslatedDocumentLifecycleManager {
   public constructor(
@@ -28,7 +28,7 @@ export class TranslatedDocumentLifecycleManager {
     }
 
     const currentText = await this.fileSystem.readFile(document.fileName);
-    if (sha256Hex(currentText) !== recordEntry[1].targetHash) {
+    if (!matchesStoredTextHash(currentText, recordEntry[1].targetHash)) {
       this.logger.info("target: keep modified translated file on close");
       return false;
     }

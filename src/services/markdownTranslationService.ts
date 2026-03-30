@@ -3,12 +3,11 @@ import { dirname, join } from "node:path";
 import type { ApiKeyStore } from "./apiKeyStore";
 import type { CacheRecord } from "./cacheStore";
 import type { CacheStore } from "./cacheStore";
-import type { MarkdownIntegrityValidator } from "./markdownIntegrityValidator";
 import type { LocalBlobCache } from "./localBlobCache";
 import type { MarkdownResponseParser } from "./markdownResponseParser";
 import type { TranslationClient } from "./openAiCompatibleClient";
 import type { ConfigurationPort, DocumentStatePort, FileSystemPort, LoggerPort, SourceDocumentSnapshot } from "./ports";
-import { sha256Hex } from "../util/hash";
+import { matchesStoredTextHash, sha256Hex } from "../util/hash";
 import { computeConfigSignature, PROVIDER_ID, PROMPT_VERSION, RULES_VERSION, TARGET_LOCALE, BUILTIN_SYSTEM_PROMPT, normalizeSystemPrompt } from "../util/translationContract";
 import { readExtensionSettings } from "../util/config";
 
@@ -24,7 +23,6 @@ interface MarkdownTranslationServiceDeps {
   localBlobCache: LocalBlobCache;
   translationClient: TranslationClient;
   responseParser: MarkdownResponseParser;
-  integrityValidator: MarkdownIntegrityValidator;
   fileSystem: FileSystemPort;
   documentState: DocumentStatePort;
   logger: LoggerPort;
@@ -40,7 +38,7 @@ export class MarkdownTranslationService {
 
   public async translateCurrentDocument(
     document: SourceDocumentSnapshot,
-    options?: { signal?: AbortSignal }
+    options?: { signal?: AbortSignal; forceRefresh?: boolean }
   ): Promise<TranslationRunResult> {
     validateDocument(document);
 
@@ -61,16 +59,15 @@ export class MarkdownTranslationService {
     let cacheRecord = await this.deps.cacheStore.get(document.uri);
     const targetExists = await this.deps.fileSystem.exists(targetUri);
     const currentTargetText = targetExists ? await this.deps.fileSystem.readFile(targetUri) : undefined;
-    const currentTargetHash = targetExists ? sha256Hex(currentTargetText ?? "") : undefined;
     const cacheReason = getCacheMissReason(cacheRecord, {
       sourceUri: document.uri,
       targetUri,
-      sourceHash,
-      targetHash: currentTargetHash,
+      sourceText: document.text,
+      targetText: currentTargetText,
       configSignature
     });
 
-    if (!cacheReason) {
+    if (!options?.forceRefresh && !cacheReason) {
       this.deps.logger.info("cache: hit");
       return {
         targetUri,
@@ -79,10 +76,11 @@ export class MarkdownTranslationService {
     }
 
     if (
+      !options?.forceRefresh &&
       cacheRecord &&
       cacheRecord.sourceUri === document.uri &&
       cacheRecord.targetUri === targetUri &&
-      cacheRecord.sourceHash === sourceHash &&
+      matchesStoredTextHash(document.text, cacheRecord.sourceHash) &&
       cacheRecord.configSignature === configSignature &&
       !targetExists
     ) {
@@ -100,7 +98,7 @@ export class MarkdownTranslationService {
       }
     }
 
-    this.deps.logger.info(`cache: miss (${cacheReason})`);
+    this.deps.logger.info(options?.forceRefresh ? "cache: miss (force refresh)" : `cache: miss (${cacheReason})`);
     const apiKey = (await this.deps.apiKeyStore.getApiKey())?.trim();
     if (!apiKey) {
       throw new Error("Missing API key. Run 'Markdown Translator: Set API Key' first.");
@@ -127,10 +125,6 @@ export class MarkdownTranslationService {
       this.deps.logger.error(`response snippet: ${truncateForLog(rawResponse)}`);
       throw error;
     }
-    this.deps.integrityValidator.validate({
-      sourceMarkdown: document.text,
-      translatedMarkdown
-    });
 
     await this.writeTargetFile(targetUri, translatedMarkdown);
 
@@ -271,8 +265,8 @@ function getCacheMissReason(
   current: {
     sourceUri: string;
     targetUri: string;
-    sourceHash: string;
-    targetHash?: string;
+    sourceText: string;
+    targetText?: string;
     configSignature: string;
   }
 ): string | undefined {
@@ -284,15 +278,15 @@ function getCacheMissReason(
     return "path changed";
   }
 
-  if (record.sourceHash !== current.sourceHash) {
+  if (!matchesStoredTextHash(current.sourceText, record.sourceHash)) {
     return "source changed";
   }
 
-  if (!current.targetHash) {
+  if (current.targetText === undefined) {
     return "target missing";
   }
 
-  if (record.targetHash !== current.targetHash) {
+  if (!matchesStoredTextHash(current.targetText, record.targetHash)) {
     return "target changed";
   }
 
