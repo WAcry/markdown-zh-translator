@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: "Release tag, for example v0.1.0"
+        description: "Release tag, for example vX.Y.Z"
         required: true
       target_ref:
         description: "Git ref to build and release"

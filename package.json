@@ -2,8 +2,8 @@
   "name": "markdown-zh-translator",
   "displayName": "Markdown Zh Translator",
   "description": "Translate Markdown files to zh-CN inside VS Code.",
-  "version": "0.1.0",
-  "publisher": "local",
+  "version": "0.1.1",
+  "publisher": "david-zhang-wacry",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -21,7 +21,7 @@
     "onCommand:markdownTranslator.setApiKey",
     "onCommand:markdownTranslator.clearApiKey"
   ],
-  "main": "./out/extension.js",
+  "main": "./dist/extension.js",
   "contributes": {
     "commands": [
       {
@@ -86,7 +86,8 @@
     }
   },
   "scripts": {
-    "vscode:prepublish": "npm run compile",
+    "vscode:prepublish": "npm run build:extension",
+    "build:extension": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\" && npx --no-install esbuild src/extension.ts --bundle --platform=node --format=cjs --external:vscode --outfile=dist/extension.js",
     "compile": "npx --no-install tsc -p ./",
     "watch": "npx --no-install tsc -watch -p ./",
     "lint": "npx --no-install eslint \"src/**/*.ts\"",
@@ -105,6 +106,7 @@
     "@typescript-eslint/eslint-plugin": "^8.24.0",
     "@typescript-eslint/parser": "^8.24.0",
     "@vscode/vsce": "^3.2.2",
+    "esbuild": "^0.25.1",
     "eslint": "^9.20.0",
     "globals": "^15.14.0",
     "mocha": "^11.1.0",
