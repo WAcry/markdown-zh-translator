@@ -5,7 +5,7 @@
 **/.vscode-test/**
 **/node_modules/**
 exec-plans/**
-out/test/**
+out/**
 src/**
 scripts/**
 test-fixtures/**
