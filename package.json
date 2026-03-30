@@ -5,6 +5,10 @@
   "version": "0.1.0",
   "publisher": "local",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/WAcry/markdown-zh-translator.git"
+  },
   "engines": {
     "vscode": "^1.97.0"
   },
@@ -82,10 +86,12 @@
     }
   },
   "scripts": {
+    "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
     "lint": "eslint \"src/**/*.ts\"",
-    "test": "npm run compile && mocha \"out/test/**/*.test.js\""
+    "test": "npm run compile && mocha \"out/test/**/*.test.js\"",
+    "package:vsix": "node scripts/package-vsix.cjs"
   },
   "dependencies": {
     "undici": "^6.21.3",
@@ -98,6 +104,7 @@
     "@types/vscode": "^1.97.0",
     "@typescript-eslint/eslint-plugin": "^8.24.0",
     "@typescript-eslint/parser": "^8.24.0",
+    "@vscode/vsce": "^3.2.2",
     "eslint": "^9.20.0",
     "globals": "^15.14.0",
     "mocha": "^11.1.0",
