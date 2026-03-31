@@ -26,15 +26,66 @@ describe("MarkdownTranslationService", () => {
     await assert.rejects(
       () =>
         service.translateCurrentDocument({
-          uri: "file:///tmp/sample.markdown",
-          fileName: "/tmp/sample.markdown",
-          languageId: "markdown",
+          uri: "file:///tmp/sample.txt",
+          uriScheme: "file",
+          fileName: "/tmp/sample.txt",
+          languageId: "plaintext",
           isUntitled: false,
           isFileSystemResource: true,
           text: "# Hello"
         }),
-      /.md/
+      /Markdown/
     );
+
+    await assert.rejects(
+      () =>
+        service.translateCurrentDocument({
+          uri: "untitled:sample",
+          uriScheme: "untitled",
+          fileName: "sample",
+          languageId: "markdown",
+          isUntitled: true,
+          isFileSystemResource: false,
+          text: "# Hello"
+        }),
+      /saved Markdown documents/
+    );
+
+    await assert.rejects(
+      () =>
+        service.translateCurrentDocument({
+          uri: "git:/tmp/sample.md",
+          uriScheme: "git",
+          fileName: "/tmp/sample.md",
+          languageId: "markdown",
+          isUntitled: false,
+          isFileSystemResource: false,
+          text: "# Hello"
+        }),
+      /path-backed Markdown documents/
+    );
+  });
+
+  it("accepts a markdown document without a .md extension and appends .zh-CN.md", async () => {
+    const fakeClient = new FakeTranslationClient();
+    const files = new Map<string, string>();
+    const service = createService({
+      translationClient: fakeClient,
+      fileSystem: createMemoryFileSystem(files)
+    });
+
+    const result = await service.translateCurrentDocument({
+      uri: "vscode-remote://ssh-remote+box/tmp/sample.markdown",
+      uriScheme: "vscode-remote",
+      fileName: "/tmp/sample.markdown",
+      languageId: "markdown",
+      isUntitled: false,
+      isFileSystemResource: false,
+      text: "# Hello"
+    });
+
+    assert.equal(result.targetUri, "/tmp/sample.markdown.zh-CN.md");
+    assert.equal(files.get("/tmp/sample.markdown.zh-CN.md"), "# 欢迎\n\nUse `npm install`.");
   });
 
   it("blocks overwrite when the target document is dirty", async () => {
@@ -715,6 +766,7 @@ function createService(overrides?: {
 function createSourceDocument(text: string): SourceDocumentSnapshot {
   return {
     uri: "file:///tmp/example.md",
+    uriScheme: "file",
     fileName: "/tmp/example.md",
     languageId: "markdown",
     isUntitled: false,

@@ -1,5 +1,6 @@
 export interface SourceDocumentSnapshot {
   uri: string;
+  uriScheme: string;
   fileName: string;
   languageId: string;
   isUntitled: boolean;
