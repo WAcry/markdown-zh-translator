@@ -98,17 +98,28 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 
   context.subscriptions.push(
-    vscode.workspace.onDidCloseTextDocument(async (document) => {
+    vscode.window.tabGroups.onDidChangeTabs(async (event) => {
       const deleteTranslatedOnClose = readDeleteTranslatedOnCloseSetting(config);
       if (!deleteTranslatedOnClose) {
         return;
       }
 
-      try {
-        await lifecycleManager.handleClosedTranslatedDocument(toClosedDocumentSnapshot(document));
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        logger.error(`close hook failed: ${message}`);
+      for (const tab of event.closed) {
+        const snapshot = toClosedDocumentSnapshotFromTab(tab);
+        if (!snapshot) {
+          continue;
+        }
+
+        if (hasRemainingTabForFile(snapshot.fileName)) {
+          continue;
+        }
+
+        try {
+          await lifecycleManager.handleClosedTranslatedDocument(snapshot);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          logger.error(`close hook failed: ${message}`);
+        }
       }
     })
   );
@@ -118,11 +129,26 @@ export function deactivate(): void {
   // Nothing to dispose beyond VS Code subscriptions.
 }
 
-function toClosedDocumentSnapshot(document: vscode.TextDocument): ClosedDocumentSnapshot {
+function toClosedDocumentSnapshotFromTab(tab: vscode.Tab): ClosedDocumentSnapshot | undefined {
+  if (!(tab.input instanceof vscode.TabInputText)) {
+    return undefined;
+  }
+
+  const document = tab.input.uri;
+  if (document.scheme !== "file") {
+    return undefined;
+  }
+
   return {
-    uri: document.uri.toString(),
-    fileName: document.uri.fsPath,
-    isUntitled: document.isUntitled,
-    isFileSystemResource: document.uri.scheme === "file"
+    uri: document.toString(),
+    fileName: document.fsPath,
+    isUntitled: false,
+    isFileSystemResource: true
   };
+}
+
+function hasRemainingTabForFile(fileName: string): boolean {
+  return vscode.window.tabGroups.all.some((group) =>
+    group.tabs.some((tab) => tab.input instanceof vscode.TabInputText && tab.input.uri.scheme === "file" && tab.input.uri.fsPath === fileName)
+  );
 }
