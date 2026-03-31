@@ -88,6 +88,28 @@ describe("MarkdownTranslationService", () => {
     assert.equal(files.get("/tmp/sample.markdown.zh-CN.md"), "# 欢迎\n\nUse `npm install`.");
   });
 
+  it("accepts a .md document even when VS Code does not classify it as markdown", async () => {
+    const fakeClient = new FakeTranslationClient();
+    const files = new Map<string, string>();
+    const service = createService({
+      translationClient: fakeClient,
+      fileSystem: createMemoryFileSystem(files)
+    });
+
+    const result = await service.translateCurrentDocument({
+      uri: "file:///tmp/SKILL.md",
+      uriScheme: "file",
+      fileName: "/tmp/SKILL.md",
+      languageId: "skill",
+      isUntitled: false,
+      isFileSystemResource: true,
+      text: "# Hello"
+    });
+
+    assert.equal(result.targetUri, "/tmp/SKILL.zh-CN.md");
+    assert.equal(files.get("/tmp/SKILL.zh-CN.md"), "# 欢迎\n\nUse `npm install`.");
+  });
+
   it("blocks overwrite when the target document is dirty", async () => {
     const service = createService({
       documentState: {

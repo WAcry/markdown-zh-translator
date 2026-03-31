@@ -1,10 +1,10 @@
 # Markdown Zh Translator
 
-Translate a saved Markdown document into `*.zh-CN.md` inside VS Code.
+Translate a saved Markdown document, or any saved `.md` file, into `*.zh-CN.md` inside VS Code.
 
 ## What V1 Does
 
-- Adds two editor title actions for eligible Markdown documents.
+- Adds two editor title actions for eligible Markdown editors or `.md` files.
 - Adds a force-refresh action when you want a brand new translation instead of a cache or local blob restore result.
 - Sends the entire source Markdown document in one `chat/completions` request.
 - Expects the model to return one outer ``````markdown fenced block.
@@ -57,6 +57,6 @@ Run the extension with `F5` in VS Code.
 
 ## Known Limits
 
-- Buttons can appear for any Markdown editor, but translation still expects a saved document with a usable path.
+- Buttons appear for files whose language mode is Markdown or whose filename ends with `.md`. Translation still expects a saved document with a usable path.
 - `*.zh-CN.md` files are still treated as generated targets, not sources.
 - V1 relies on prompt rules to preserve Markdown structure and intentionally does not hard-reject minor formatting drift from the model.
