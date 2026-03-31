@@ -36,6 +36,7 @@ export function createTranslateCurrentDocumentCommand(
 function toSourceDocumentSnapshot(document: vscode.TextDocument): SourceDocumentSnapshot {
   return {
     uri: document.uri.toString(),
+    uriScheme: document.uri.scheme,
     fileName: document.uri.fsPath,
     languageId: document.languageId,
     isUntitled: document.isUntitled,

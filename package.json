@@ -2,7 +2,7 @@
   "name": "markdown-zh-translator",
   "displayName": "Markdown Zh Translator",
   "description": "Translate Markdown files to zh-CN inside VS Code.",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "publisher": "david-zhang-wacry",
   "license": "MIT",
   "repository": {
@@ -49,12 +49,12 @@
         {
           "command": "markdownTranslator.translateCurrentDocument",
           "group": "navigation",
-          "when": "resourceLangId == markdown && resourceExtname == .md && isFileSystemResource && !(resourceFilename =~ /\\.zh-CN\\.md$/i)"
+          "when": "resourceLangId == markdown && !(resourceFilename =~ /\\.zh-CN\\.md$/i)"
         },
         {
           "command": "markdownTranslator.forceTranslateCurrentDocument",
           "group": "navigation@2",
-          "when": "resourceLangId == markdown && resourceExtname == .md && isFileSystemResource && !(resourceFilename =~ /\\.zh-CN\\.md$/i)"
+          "when": "resourceLangId == markdown && !(resourceFilename =~ /\\.zh-CN\\.md$/i)"
         }
       ]
     },

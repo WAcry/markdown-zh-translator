@@ -235,16 +235,16 @@ export class MarkdownTranslationService {
 }
 
 function validateDocument(document: SourceDocumentSnapshot): void {
-  if (document.isUntitled || !document.isFileSystemResource) {
-    throw new Error("Only saved file-system Markdown documents are supported.");
+  if (document.isUntitled) {
+    throw new Error("Only saved Markdown documents are supported.");
   }
 
   if (document.languageId !== "markdown") {
     throw new Error("Only Markdown documents are supported.");
   }
 
-  if (!document.fileName.toLowerCase().endsWith(".md")) {
-    throw new Error("Only .md Markdown documents are supported.");
+  if (document.uriScheme !== "file" && document.uriScheme !== "vscode-remote") {
+    throw new Error("Only path-backed Markdown documents are supported.");
   }
 
   if (document.fileName.toLowerCase().endsWith(".zh-cn.md")) {
@@ -257,7 +257,7 @@ function validateDocument(document: SourceDocumentSnapshot): void {
 }
 
 function toTargetMarkdownPath(fileName: string): string {
-  return fileName.replace(/\.md$/i, `.${TARGET_LOCALE}.md`);
+  return fileName.toLowerCase().endsWith(".md") ? fileName.replace(/\.md$/i, `.${TARGET_LOCALE}.md`) : `${fileName}.${TARGET_LOCALE}.md`;
 }
 
 function getCacheMissReason(

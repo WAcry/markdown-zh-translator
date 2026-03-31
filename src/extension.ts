@@ -104,12 +104,7 @@ export function activate(context: vscode.ExtensionContext): void {
         return;
       }
 
-      for (const tab of event.closed) {
-        const snapshot = toClosedDocumentSnapshotFromTab(tab);
-        if (!snapshot) {
-          continue;
-        }
-
+      for (const snapshot of toClosedDocumentSnapshotsFromTabs(event.closed)) {
         if (hasRemainingTabForFile(snapshot.fileName)) {
           continue;
         }
@@ -129,26 +124,68 @@ export function deactivate(): void {
   // Nothing to dispose beyond VS Code subscriptions.
 }
 
-function toClosedDocumentSnapshotFromTab(tab: vscode.Tab): ClosedDocumentSnapshot | undefined {
-  if (!(tab.input instanceof vscode.TabInputText)) {
-    return undefined;
+function toClosedDocumentSnapshotsFromTabs(tabs: readonly vscode.Tab[]): ClosedDocumentSnapshot[] {
+  const snapshots = new Map<string, ClosedDocumentSnapshot>();
+  for (const tab of tabs) {
+    for (const snapshot of toClosedDocumentSnapshotsFromTab(tab)) {
+      snapshots.set(snapshot.fileName, snapshot);
+    }
+  }
+  return Array.from(snapshots.values());
+}
+
+function toClosedDocumentSnapshotsFromTab(tab: vscode.Tab): ClosedDocumentSnapshot[] {
+  if (tab.input instanceof vscode.TabInputText) {
+    const document = tab.input.uri;
+    if (document.scheme !== "file") {
+      return [];
+    }
+
+    return [
+      {
+        uri: document.toString(),
+        fileName: document.fsPath,
+        isUntitled: false,
+        isFileSystemResource: true
+      }
+    ];
   }
 
-  const document = tab.input.uri;
-  if (document.scheme !== "file") {
-    return undefined;
+  if (tab.input instanceof vscode.TabInputTextDiff) {
+    const snapshots: ClosedDocumentSnapshot[] = [];
+    for (const document of [tab.input.original, tab.input.modified]) {
+      if (document.scheme !== "file") {
+        continue;
+      }
+
+      snapshots.push({
+        uri: document.toString(),
+        fileName: document.fsPath,
+        isUntitled: false,
+        isFileSystemResource: true
+      });
+    }
+    return snapshots;
   }
 
-  return {
-    uri: document.toString(),
-    fileName: document.fsPath,
-    isUntitled: false,
-    isFileSystemResource: true
-  };
+  return [];
 }
 
 function hasRemainingTabForFile(fileName: string): boolean {
   return vscode.window.tabGroups.all.some((group) =>
-    group.tabs.some((tab) => tab.input instanceof vscode.TabInputText && tab.input.uri.scheme === "file" && tab.input.uri.fsPath === fileName)
+    group.tabs.some((tab) => {
+      if (tab.input instanceof vscode.TabInputText) {
+        return tab.input.uri.scheme === "file" && tab.input.uri.fsPath === fileName;
+      }
+
+      if (tab.input instanceof vscode.TabInputTextDiff) {
+        return (
+          (tab.input.original.scheme === "file" && tab.input.original.fsPath === fileName) ||
+          (tab.input.modified.scheme === "file" && tab.input.modified.fsPath === fileName)
+        );
+      }
+
+      return false;
+    })
   );
 }
