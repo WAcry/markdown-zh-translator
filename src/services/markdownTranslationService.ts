@@ -239,8 +239,10 @@ function validateDocument(document: SourceDocumentSnapshot): void {
     throw new Error("Only saved Markdown documents are supported.");
   }
 
-  if (document.languageId !== "markdown") {
-    throw new Error("Only Markdown documents are supported.");
+  const hasMarkdownLanguage = document.languageId === "markdown";
+  const hasMarkdownExtension = document.fileName.toLowerCase().endsWith(".md");
+  if (!hasMarkdownLanguage && !hasMarkdownExtension) {
+    throw new Error("Only Markdown documents or .md files are supported.");
   }
 
   if (document.uriScheme !== "file" && document.uriScheme !== "vscode-remote") {
