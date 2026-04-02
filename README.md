@@ -2,12 +2,12 @@
 
 Translate a saved Markdown document, or any saved `.md` file, into `*.zh-CN.md` inside VS Code.
 
-## What V1 Does
+## Features
 
 - Adds two editor title actions for eligible Markdown editors or `.md` files.
 - Adds a force-refresh action when you want a brand new translation instead of a cache or local blob restore result.
 - Sends the entire source Markdown document in one `chat/completions` request.
-- Expects the model to return one outer ``````markdown fenced block.
+- Expects the model to return one outer `````markdown````` fenced block.
 - Reuses an existing translated file when the cache is still valid.
 - Restores a deleted translated file from the persistent local blob cache when the source and config still match.
 - Refuses to overwrite a translated file that has unsaved editor changes.
@@ -36,11 +36,9 @@ Clear the API key with:
 
 The model must return exactly one outer fenced block using 5 backticks:
 
-``````text
 `````markdown
-<translated markdown>
+[translated markdown]
 `````
-``````
 
 The extension extracts only the Markdown inside the unique outer fence. JSON, malformed fences, or responses with zero or multiple candidate fences are rejected. If the model adds a little noise before or after the unique fence, that noise is discarded.
 
@@ -54,9 +52,3 @@ npm test
 ```
 
 Run the extension with `F5` in VS Code.
-
-## Known Limits
-
-- Buttons appear for files whose language mode is Markdown or whose filename ends with `.md`. Translation still expects a saved document with a usable path.
-- `*.zh-CN.md` files are still treated as generated targets, not sources.
-- V1 relies on prompt rules to preserve Markdown structure and intentionally does not hard-reject minor formatting drift from the model.
