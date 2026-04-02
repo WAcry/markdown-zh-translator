@@ -3,6 +3,7 @@ import type { StateStorePort } from "./ports";
 export interface CacheRecord {
   sourceUri: string;
   targetUri: string;
+  targetFileName?: string;
   sourceHash: string;
   targetHash: string;
   configSignature: string;
@@ -43,13 +44,21 @@ export class CacheStore {
     await Promise.resolve(this.stateStore.update(CACHE_KEY, all));
   }
 
-  public async findByTargetUri(targetUri: string): Promise<[string, CacheRecord] | undefined> {
+  public async findByTarget(target: { targetUri: string; targetFileName: string }): Promise<[string, CacheRecord] | undefined> {
     const all = await this.getAll();
+
     for (const [sourceUri, record] of Object.entries(all)) {
-      if (record.targetUri === targetUri) {
+      if (record.targetUri === target.targetUri && (record.targetFileName === undefined || record.targetFileName === target.targetFileName)) {
         return [sourceUri, record];
       }
     }
+
+    for (const [sourceUri, record] of Object.entries(all)) {
+      if (record.targetFileName === undefined && record.targetUri === target.targetFileName) {
+        return [sourceUri, record];
+      }
+    }
+
     return undefined;
   }
 }

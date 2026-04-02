@@ -11,11 +11,17 @@ export function createSetApiKeyCommand(apiKeyStore: ApiKeyStore): () => Promise<
       password: true
     });
 
-    if (!value) {
+    if (value === undefined) {
       return;
     }
 
-    await apiKeyStore.setApiKey(value);
+    const normalized = value.trim();
+    if (!normalized) {
+      await vscode.window.showWarningMessage("API key cannot be empty.");
+      return;
+    }
+
+    await apiKeyStore.setApiKey(normalized);
     await vscode.window.showInformationMessage("Markdown Translator API key stored.");
   };
 }

@@ -24,7 +24,7 @@ export function createTranslateCurrentDocumentCommand(
         async () => service.translateCurrentDocument(document, { forceRefresh: options?.forceRefresh })
       );
 
-      const targetDocument = await vscode.workspace.openTextDocument(vscode.Uri.file(result.targetUri));
+      const targetDocument = await vscode.workspace.openTextDocument(vscode.Uri.parse(result.targetUri, true));
       await vscode.window.showTextDocument(targetDocument, { preview: false });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Translation failed";
@@ -40,7 +40,11 @@ function toSourceDocumentSnapshot(document: vscode.TextDocument): SourceDocument
     fileName: document.uri.fsPath,
     languageId: document.languageId,
     isUntitled: document.isUntitled,
-    isFileSystemResource: document.uri.scheme === "file",
+    isFileSystemResource: isSupportedDocumentScheme(document.uri.scheme),
     text: document.getText()
   };
+}
+
+function isSupportedDocumentScheme(scheme: string): boolean {
+  return scheme === "file" || scheme === "vscode-remote";
 }

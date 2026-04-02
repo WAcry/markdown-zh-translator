@@ -25,7 +25,7 @@ export interface FileSystemPort {
 }
 
 export interface DocumentStatePort {
-  isDirty(filePath: string): boolean;
+  isDirty(documentUri: string): boolean;
 }
 
 export interface LoggerPort {

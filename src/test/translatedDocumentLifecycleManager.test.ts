@@ -146,6 +146,52 @@ describe("TranslatedDocumentLifecycleManager", () => {
     assert.equal(deleted, false);
     assert.equal(files.has(filePath), true);
   });
+
+  it("matches remote translated documents by full URI before falling back to legacy path-only cache entries", async () => {
+    const filePath = "/tmp/example.zh-CN.md";
+    const content = "# remote cached";
+    const files = new Map<string, string>([[filePath, content]]);
+    const cacheStore = new CacheStore(
+      createStateStore(
+        new Map<string, unknown>([
+          [
+            "markdownTranslator.cache.v1",
+            {
+              "vscode-remote://ssh-remote+alpha/tmp/example.md": {
+                sourceUri: "vscode-remote://ssh-remote+alpha/tmp/example.md",
+                targetUri: "vscode-remote://ssh-remote+alpha/tmp/example.zh-CN.md",
+                targetFileName: filePath,
+                sourceHash: "source-a",
+                targetHash: sha256Hex("# alpha cached"),
+                configSignature: "signature",
+                generatedAt: "2026-03-30T00:00:00Z"
+              },
+              "vscode-remote://ssh-remote+beta/tmp/example.md": {
+                sourceUri: "vscode-remote://ssh-remote+beta/tmp/example.md",
+                targetUri: "vscode-remote://ssh-remote+beta/tmp/example.zh-CN.md",
+                targetFileName: filePath,
+                sourceHash: "source-b",
+                targetHash: sha256Hex(content),
+                configSignature: "signature",
+                generatedAt: "2026-03-30T00:00:00Z"
+              }
+            }
+          ]
+        ])
+      )
+    );
+
+    const manager = new TranslatedDocumentLifecycleManager(cacheStore, createMemoryFileSystem(files), createLogger());
+    const deleted = await manager.handleClosedTranslatedDocument({
+      uri: "vscode-remote://ssh-remote+beta/tmp/example.zh-CN.md",
+      fileName: filePath,
+      isUntitled: false,
+      isFileSystemResource: true
+    });
+
+    assert.equal(deleted, true);
+    assert.equal(files.has(filePath), false);
+  });
 });
 
 function createStateStore(store: Map<string, unknown>): StateStorePort {

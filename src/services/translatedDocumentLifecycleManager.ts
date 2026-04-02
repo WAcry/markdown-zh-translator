@@ -18,7 +18,10 @@ export class TranslatedDocumentLifecycleManager {
       return false;
     }
 
-    const recordEntry = await this.cacheStore.findByTargetUri(document.fileName);
+    const recordEntry = await this.cacheStore.findByTarget({
+      targetUri: document.uri,
+      targetFileName: document.fileName
+    });
     if (!recordEntry) {
       return false;
     }

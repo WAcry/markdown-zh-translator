@@ -2,7 +2,7 @@
   "name": "markdown-zh-translator",
   "displayName": "Markdown Zh Translator",
   "description": "Translate Markdown files to zh-CN inside VS Code.",
-  "version": "0.1.6",
+  "version": "2.0.0",
   "publisher": "david-zhang-wacry",
   "license": "MIT",
   "repository": {

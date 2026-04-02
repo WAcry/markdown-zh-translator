@@ -69,23 +69,31 @@ describe("MarkdownTranslationService", () => {
   it("accepts a markdown document without a .md extension and appends .zh-CN.md", async () => {
     const fakeClient = new FakeTranslationClient();
     const files = new Map<string, string>();
+    const state = new Map<string, unknown>();
     const service = createService({
       translationClient: fakeClient,
-      fileSystem: createMemoryFileSystem(files)
+      fileSystem: createMemoryFileSystem(files),
+      state
     });
 
-    const result = await service.translateCurrentDocument({
+    const source = {
       uri: "vscode-remote://ssh-remote+box/tmp/sample.markdown",
       uriScheme: "vscode-remote",
       fileName: "/tmp/sample.markdown",
       languageId: "markdown",
       isUntitled: false,
-      isFileSystemResource: false,
+      isFileSystemResource: true,
       text: "# Hello"
-    });
+    } satisfies SourceDocumentSnapshot;
 
-    assert.equal(result.targetUri, "/tmp/sample.markdown.zh-CN.md");
+    const result = await service.translateCurrentDocument(source);
+
+    assert.equal(result.targetUri, "vscode-remote://ssh-remote+box/tmp/sample.markdown.zh-CN.md");
+    assert.equal(result.targetFileName, "/tmp/sample.markdown.zh-CN.md");
     assert.equal(files.get("/tmp/sample.markdown.zh-CN.md"), "# 欢迎\n\nUse `npm install`.");
+    const cache = (state.get("markdownTranslator.cache.v1") as Record<string, { targetUri: string; targetFileName?: string }>)[source.uri];
+    assert.equal(cache.targetUri, "vscode-remote://ssh-remote+box/tmp/sample.markdown.zh-CN.md");
+    assert.equal(cache.targetFileName, "/tmp/sample.markdown.zh-CN.md");
   });
 
   it("accepts a .md document even when VS Code does not classify it as markdown", async () => {
@@ -106,7 +114,8 @@ describe("MarkdownTranslationService", () => {
       text: "# Hello"
     });
 
-    assert.equal(result.targetUri, "/tmp/SKILL.zh-CN.md");
+    assert.equal(result.targetUri, "file:///tmp/SKILL.zh-CN.md");
+    assert.equal(result.targetFileName, "/tmp/SKILL.zh-CN.md");
     assert.equal(files.get("/tmp/SKILL.zh-CN.md"), "# 欢迎\n\nUse `npm install`.");
   });
 
@@ -148,6 +157,8 @@ describe("MarkdownTranslationService", () => {
     const result = await service.translateCurrentDocument(source);
 
     assert.equal(result.cacheStatus, "miss");
+    assert.equal(result.targetUri, "file:///tmp/example.zh-CN.md");
+    assert.equal(result.targetFileName, "/tmp/example.zh-CN.md");
     assert.equal(fakeClient.sourceMarkdowns.length, 1);
     assert.equal(fakeClient.sourceMarkdowns[0], "# Hello\n\nUse `npm install`.");
     assert.equal(files.get("/tmp/example.zh-CN.md"), "# 欢迎\n\nUse `npm install`.");
@@ -738,6 +749,24 @@ describe("MarkdownTranslationService", () => {
 
     assert.equal(result.cacheStatus, "miss");
     assert.equal(fakeClient.sourceMarkdowns.length, 1);
+  });
+
+  it("cleans up the temp file when renaming the translated output fails", async () => {
+    const fakeClient = new FakeTranslationClient();
+    const files = new Map<string, string>();
+    const baseFileSystem = createMemoryFileSystem(files);
+    const service = createService({
+      translationClient: fakeClient,
+      fileSystem: {
+        ...baseFileSystem,
+        rename: async () => {
+          throw new Error("rename failed");
+        }
+      }
+    });
+
+    await assert.rejects(() => service.translateCurrentDocument(createSourceDocument("# Hello")), /rename failed/);
+    assert.equal(Array.from(files.keys()).some((key) => key.endsWith(".tmp")), false);
   });
 });
 

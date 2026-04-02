@@ -34,13 +34,15 @@ Clear the API key with:
 
 ## Response Contract
 
-The model must return exactly one outer fenced block using 5 backticks:
+The model should return exactly one outer fenced block using 5 backticks:
 
+``````text
 `````markdown
-[translated markdown]
+<translated markdown>
 `````
+``````
 
-The extension extracts only the Markdown inside the unique outer fence. JSON, malformed fences, or responses with zero or multiple candidate fences are rejected. If the model adds a little noise before or after the unique fence, that noise is discarded.
+The extension extracts only the Markdown inside the unique outer fence. It accepts either `````markdown````` or `````md````` as the info string. JSON, malformed fences, or responses with zero or multiple candidate fences are rejected. If the model adds a little noise before or after the unique fence, that noise is discarded.
 
 ## Development
 

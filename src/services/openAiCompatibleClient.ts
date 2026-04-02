@@ -106,7 +106,8 @@ export class OpenAiCompatibleClient implements TranslationClient {
 
       if (Array.isArray(content)) {
         const text = content
-          .map((item) => item.text ?? "")
+          .filter((item) => item.type === "text" && typeof item.text === "string")
+          .map((item) => item.text)
           .join("")
           .trim();
         if (text) {

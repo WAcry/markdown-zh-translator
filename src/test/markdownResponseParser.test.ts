@@ -10,6 +10,20 @@ describe("MarkdownResponseParser", () => {
     assert.equal(result, "# 标题");
   });
 
+  it("accepts a closing fence without a trailing newline in the markdown body", () => {
+    const parser = new MarkdownResponseParser();
+    const result = parser.extractTranslatedMarkdown("`````markdown\n# 标题`````");
+
+    assert.equal(result, "# 标题");
+  });
+
+  it("accepts an md info string alias", () => {
+    const parser = new MarkdownResponseParser();
+    const result = parser.extractTranslatedMarkdown("`````md\n# 标题\n`````");
+
+    assert.equal(result, "# 标题");
+  });
+
   it("ignores non-document text before and after the fenced block", () => {
     const parser = new MarkdownResponseParser();
     const result = parser.extractTranslatedMarkdown("Here is the translation:\n`````markdown\n# 标题\n`````\nDone.");

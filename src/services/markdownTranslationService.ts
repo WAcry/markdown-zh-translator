@@ -13,6 +13,7 @@ import { readExtensionSettings } from "../util/config";
 
 export interface TranslationRunResult {
   targetUri: string;
+  targetFileName: string;
   cacheStatus: "hit" | "miss";
 }
 
@@ -43,8 +44,8 @@ export class MarkdownTranslationService {
     validateDocument(document);
 
     const settings = readExtensionSettings(this.deps.config);
-    const targetUri = toTargetMarkdownPath(document.fileName);
-    if (this.deps.documentState.isDirty(targetUri)) {
+    const targetDocument = toTargetDocumentReference(document);
+    if (this.deps.documentState.isDirty(targetDocument.targetUri)) {
       this.deps.logger.warn("target is dirty, abort overwrite");
       throw new Error("Please save or discard unsaved changes in the translated Markdown file before translating again.");
     }
@@ -57,11 +58,12 @@ export class MarkdownTranslationService {
     });
 
     let cacheRecord = await this.deps.cacheStore.get(document.uri);
-    const targetExists = await this.deps.fileSystem.exists(targetUri);
-    const currentTargetText = targetExists ? await this.deps.fileSystem.readFile(targetUri) : undefined;
+    const targetExists = await this.deps.fileSystem.exists(targetDocument.targetFileName);
+    const currentTargetText = targetExists ? await this.deps.fileSystem.readFile(targetDocument.targetFileName) : undefined;
     const cacheReason = getCacheMissReason(cacheRecord, {
       sourceUri: document.uri,
-      targetUri,
+      targetUri: targetDocument.targetUri,
+      targetFileName: targetDocument.targetFileName,
       sourceText: document.text,
       targetText: currentTargetText,
       configSignature
@@ -70,7 +72,8 @@ export class MarkdownTranslationService {
     if (!options?.forceRefresh && !cacheReason) {
       this.deps.logger.info("cache: hit");
       return {
-        targetUri,
+        targetUri: targetDocument.targetUri,
+        targetFileName: targetDocument.targetFileName,
         cacheStatus: "hit"
       };
     }
@@ -79,7 +82,7 @@ export class MarkdownTranslationService {
       !options?.forceRefresh &&
       cacheRecord &&
       cacheRecord.sourceUri === document.uri &&
-      cacheRecord.targetUri === targetUri &&
+      matchesTargetDocument(cacheRecord, targetDocument) &&
       matchesStoredTextHash(document.text, cacheRecord.sourceHash) &&
       cacheRecord.configSignature === configSignature &&
       !targetExists
@@ -87,12 +90,13 @@ export class MarkdownTranslationService {
       cacheRecord = await this.enforceCurrentBlobLimit(document.uri, cacheRecord, settings.localBlobCacheMaxBytes);
       const restoredMarkdown = await this.deps.localBlobCache.read(cacheRecord);
       if (restoredMarkdown !== undefined) {
-        await this.writeTargetFile(targetUri, restoredMarkdown);
+        await this.writeTargetFile(targetDocument.targetFileName, restoredMarkdown);
         const touchedRecord = this.deps.localBlobCache.touch(cacheRecord);
         await this.deps.cacheStore.set(document.uri, touchedRecord);
         this.deps.logger.info("cache: hit (restored from local blob)");
         return {
-          targetUri,
+          targetUri: targetDocument.targetUri,
+          targetFileName: targetDocument.targetFileName,
           cacheStatus: "hit"
         };
       }
@@ -126,12 +130,13 @@ export class MarkdownTranslationService {
       throw error;
     }
 
-    await this.writeTargetFile(targetUri, translatedMarkdown);
+    await this.writeTargetFile(targetDocument.targetFileName, translatedMarkdown);
 
     const newTargetHash = sha256Hex(translatedMarkdown);
     const record: CacheRecord = {
       sourceUri: document.uri,
-      targetUri,
+      targetUri: targetDocument.targetUri,
+      targetFileName: targetDocument.targetFileName,
       sourceHash,
       targetHash: newTargetHash,
       configSignature,
@@ -139,19 +144,30 @@ export class MarkdownTranslationService {
     };
     const recordWithBlob = await this.persistBlobAndPrune(cacheRecord, record, translatedMarkdown, settings.localBlobCacheMaxBytes);
     await this.deps.cacheStore.set(document.uri, recordWithBlob);
-    this.deps.logger.info(`wrote: ${targetUri}`);
+    this.deps.logger.info(`wrote: ${targetDocument.targetUri}`);
 
     return {
-      targetUri,
+      targetUri: targetDocument.targetUri,
+      targetFileName: targetDocument.targetFileName,
       cacheStatus: "miss"
     };
   }
 
-  private async writeTargetFile(targetUri: string, translatedMarkdown: string): Promise<void> {
-    const tempPath = join(dirname(targetUri), `${sha256Hex(targetUri)}.${Date.now()}.tmp`);
-    await this.deps.fileSystem.ensureDir(dirname(targetUri));
+  private async writeTargetFile(targetFileName: string, translatedMarkdown: string): Promise<void> {
+    const tempPath = join(dirname(targetFileName), `${sha256Hex(targetFileName)}.${Date.now()}.tmp`);
+    await this.deps.fileSystem.ensureDir(dirname(targetFileName));
     await this.deps.fileSystem.writeFile(tempPath, translatedMarkdown);
-    await this.deps.fileSystem.rename(tempPath, targetUri);
+    try {
+      await this.deps.fileSystem.rename(tempPath, targetFileName);
+    } catch (error) {
+      try {
+        await this.deps.fileSystem.delete(tempPath);
+      } catch {
+        // Best-effort cleanup only.
+      }
+
+      throw error;
+    }
   }
 
   private async persistBlobAndPrune(
@@ -262,11 +278,37 @@ function toTargetMarkdownPath(fileName: string): string {
   return fileName.toLowerCase().endsWith(".md") ? fileName.replace(/\.md$/i, `.${TARGET_LOCALE}.md`) : `${fileName}.${TARGET_LOCALE}.md`;
 }
 
+interface TargetDocumentReference {
+  targetUri: string;
+  targetFileName: string;
+}
+
+function toTargetDocumentReference(document: SourceDocumentSnapshot): TargetDocumentReference {
+  return {
+    targetUri: toTargetMarkdownUri(document.uri),
+    targetFileName: toTargetMarkdownPath(document.fileName)
+  };
+}
+
+function toTargetMarkdownUri(sourceUri: string): string {
+  return sourceUri.replace(/([^/?#]+)(?=([?#].*)?$)/, (encodedBaseName) => {
+    const sourceBaseName = decodeURIComponent(encodedBaseName);
+    return encodeURIComponent(toTargetMarkdownPath(sourceBaseName));
+  });
+}
+
+function matchesTargetDocument(record: Pick<CacheRecord, "targetUri" | "targetFileName">, current: TargetDocumentReference): boolean {
+  if (record.targetFileName !== undefined) {
+    return record.targetUri === current.targetUri && record.targetFileName === current.targetFileName;
+  }
+
+  return record.targetUri === current.targetUri || record.targetUri === current.targetFileName;
+}
+
 function getCacheMissReason(
   record: CacheRecord | undefined,
-  current: {
+  current: TargetDocumentReference & {
     sourceUri: string;
-    targetUri: string;
     sourceText: string;
     targetText?: string;
     configSignature: string;
@@ -276,7 +318,7 @@ function getCacheMissReason(
     return "no record";
   }
 
-  if (record.sourceUri !== current.sourceUri || record.targetUri !== current.targetUri) {
+  if (record.sourceUri !== current.sourceUri || !matchesTargetDocument(record, current)) {
     return "path changed";
   }
 
@@ -313,6 +355,7 @@ function clearBlobMetadata(record: CacheRecord): CacheRecord {
   return {
     sourceUri: record.sourceUri,
     targetUri: record.targetUri,
+    targetFileName: record.targetFileName,
     sourceHash: record.sourceHash,
     targetHash: record.targetHash,
     configSignature: record.configSignature,

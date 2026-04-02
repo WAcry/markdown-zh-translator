@@ -65,8 +65,10 @@ export function activate(context: vscode.ExtensionContext): void {
   };
 
   const documentState: DocumentStatePort = {
-    isDirty: (filePath) =>
-      vscode.workspace.textDocuments.some((document) => document.uri.scheme === "file" && document.uri.fsPath === filePath && document.isDirty)
+    isDirty: (documentUri) =>
+      vscode.workspace.textDocuments.some(
+        (document) => isSupportedDocumentScheme(document.uri.scheme) && document.uri.toString() === documentUri && document.isDirty
+      )
   };
 
   const apiKeyStore = new ApiKeyStore(secrets);
@@ -105,7 +107,7 @@ export function activate(context: vscode.ExtensionContext): void {
       }
 
       for (const snapshot of toClosedDocumentSnapshotsFromTabs(event.closed)) {
-        if (hasRemainingTabForFile(snapshot.fileName)) {
+        if (hasRemainingTabForDocument(snapshot.uri)) {
           continue;
         }
 
@@ -128,7 +130,7 @@ function toClosedDocumentSnapshotsFromTabs(tabs: readonly vscode.Tab[]): ClosedD
   const snapshots = new Map<string, ClosedDocumentSnapshot>();
   for (const tab of tabs) {
     for (const snapshot of toClosedDocumentSnapshotsFromTab(tab)) {
-      snapshots.set(snapshot.fileName, snapshot);
+      snapshots.set(snapshot.uri, snapshot);
     }
   }
   return Array.from(snapshots.values());
@@ -137,7 +139,7 @@ function toClosedDocumentSnapshotsFromTabs(tabs: readonly vscode.Tab[]): ClosedD
 function toClosedDocumentSnapshotsFromTab(tab: vscode.Tab): ClosedDocumentSnapshot[] {
   if (tab.input instanceof vscode.TabInputText) {
     const document = tab.input.uri;
-    if (document.scheme !== "file") {
+    if (!isSupportedDocumentScheme(document.scheme)) {
       return [];
     }
 
@@ -154,7 +156,7 @@ function toClosedDocumentSnapshotsFromTab(tab: vscode.Tab): ClosedDocumentSnapsh
   if (tab.input instanceof vscode.TabInputTextDiff) {
     const snapshots: ClosedDocumentSnapshot[] = [];
     for (const document of [tab.input.original, tab.input.modified]) {
-      if (document.scheme !== "file") {
+      if (!isSupportedDocumentScheme(document.scheme)) {
         continue;
       }
 
@@ -171,21 +173,25 @@ function toClosedDocumentSnapshotsFromTab(tab: vscode.Tab): ClosedDocumentSnapsh
   return [];
 }
 
-function hasRemainingTabForFile(fileName: string): boolean {
+function hasRemainingTabForDocument(documentUri: string): boolean {
   return vscode.window.tabGroups.all.some((group) =>
     group.tabs.some((tab) => {
       if (tab.input instanceof vscode.TabInputText) {
-        return tab.input.uri.scheme === "file" && tab.input.uri.fsPath === fileName;
+        return isSupportedDocumentScheme(tab.input.uri.scheme) && tab.input.uri.toString() === documentUri;
       }
 
       if (tab.input instanceof vscode.TabInputTextDiff) {
         return (
-          (tab.input.original.scheme === "file" && tab.input.original.fsPath === fileName) ||
-          (tab.input.modified.scheme === "file" && tab.input.modified.fsPath === fileName)
+          (isSupportedDocumentScheme(tab.input.original.scheme) && tab.input.original.toString() === documentUri) ||
+          (isSupportedDocumentScheme(tab.input.modified.scheme) && tab.input.modified.toString() === documentUri)
         );
       }
 
       return false;
     })
   );
+}
+
+function isSupportedDocumentScheme(scheme: string): boolean {
+  return scheme === "file" || scheme === "vscode-remote";
 }
